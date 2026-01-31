@@ -1,6 +1,33 @@
-﻿import { Role } from '@prisma/client'
-import { ApiMapping } from '@moa/shared'
-import { decryptSecret } from './crypto'
+import { decryptSecret } from './crypto.js'
+
+export type LlmRole = 'system' | 'user' | 'assistant'
+
+export interface ApiMappingRequest {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  path: string
+  headers: Record<string, string>
+  body: any
+}
+
+export interface ApiMappingStream {
+  eventFormat: 'sse'
+  deltaPath: string
+  doneSignal?: string
+}
+
+export interface ApiMappingResponse {
+  messagePath: string
+  usagePath?: string
+  stream?: ApiMappingStream
+}
+
+export interface ApiMapping {
+  id?: string
+  name: string
+  providerType: 'openai' | 'anthropic' | 'custom'
+  request: ApiMappingRequest
+  response: ApiMappingResponse
+}
 
 export interface ProviderRuntime {
   baseUrl: string
@@ -9,7 +36,7 @@ export interface ProviderRuntime {
 }
 
 export interface LlmMessage {
-  role: Role
+  role: LlmRole
   content: string
 }
 

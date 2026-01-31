@@ -11,6 +11,12 @@
 3. 启动开发：`npm run dev`
 4. 前端地址：`http://localhost:3000`
 
+## 后端初始化（首次）
+
+1. 确保本机 PostgreSQL 已启动，并创建数据库 `moa`
+2. 生成 Prisma Client：`npx prisma generate --schema apps/api/prisma/schema.prisma`
+3. 初始化数据库结构：`npx prisma migrate dev --schema apps/api/prisma/schema.prisma --name init`
+
 ## 目录结构
 
 - `apps/web` 前端
