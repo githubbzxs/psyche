@@ -9,6 +9,7 @@
    - `apps/web/.env.example` -> `apps/web/.env`
 2. 安装依赖：`npm install`
 3. 启动开发：`npm run dev`
+4. 前端地址：`http://localhost:3000`
 
 ## 目录结构
 
