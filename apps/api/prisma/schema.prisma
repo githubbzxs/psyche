@@ -1,0 +1,185 @@
+﻿generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProviderType {
+  openai
+  anthropic
+  custom
+}
+
+enum Role {
+  system
+  user
+  assistant
+}
+
+enum DebateStatus {
+  idle
+  running
+  paused
+  done
+}
+
+enum StreamMode {
+  stream
+  batch
+}
+
+model User {
+  id          String          @id @default(cuid())
+  email       String          @unique
+  name        String?
+  avatarUrl   String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  accounts    OAuthAccount[]
+  projects    Project[]
+  providerCfg ProviderConfig[]
+  mappings    ApiMapping[]
+  settings    UserSettings?
+  strategy    StrategyConfig?
+  metrics     UsageMetric[]
+}
+
+model OAuthAccount {
+  id                 String   @id @default(cuid())
+  userId             String
+  provider           String
+  providerAccountId  String
+  accessToken        String?
+  refreshToken       String?
+  createdAt          DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerAccountId])
+}
+
+model Project {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id])
+  agents   Agent[]
+  sessions Session[]
+}
+
+model Agent {
+  id               String   @id @default(cuid())
+  projectId        String
+  name             String
+  role             String
+  model            String
+  providerConfigId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project        Project         @relation(fields: [projectId], references: [id])
+  providerConfig ProviderConfig? @relation(fields: [providerConfigId], references: [id])
+}
+
+model Session {
+  id          String       @id @default(cuid())
+  projectId   String
+  title       String
+  status      DebateStatus @default(idle)
+  maxTurns    Int          @default(6)
+  currentTurn Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  project  Project   @relation(fields: [projectId], references: [id])
+  messages Message[]
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      Role
+  content   String
+  agentId   String?
+  createdAt DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id])
+}
+
+model ProviderConfig {
+  id             String        @id @default(cuid())
+  userId         String
+  name           String
+  type           ProviderType
+  baseUrl        String
+  defaultModel   String
+  apiKeyEncrypted String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id])
+  agents   Agent[]
+  metrics  UsageMetric[]
+}
+
+model ApiMapping {
+  id           String        @id @default(cuid())
+  userId       String
+  name         String
+  providerType ProviderType
+  mappingJson  Json
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model UserSettings {
+  id         String     @id @default(cuid())
+  userId     String     @unique
+  language   String     @default("zh-CN")
+  theme      String     @default("dark-cyber")
+  streamMode StreamMode @default(stream)
+  maxTurns   Int        @default(6)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model StrategyConfig {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  providerConfigId String
+  model            String
+  prompt           String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user           User           @relation(fields: [userId], references: [id])
+  providerConfig ProviderConfig @relation(fields: [providerConfigId], references: [id])
+}
+
+model UsageMetric {
+  id               String   @id @default(cuid())
+  userId           String
+  providerConfigId String
+  date             String
+  requests         Int      @default(0)
+  tokensIn         Int      @default(0)
+  tokensOut        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user           User           @relation(fields: [userId], references: [id])
+  providerConfig ProviderConfig @relation(fields: [providerConfigId], references: [id])
+
+  @@unique([userId, providerConfigId, date])
+}
