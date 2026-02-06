@@ -1,148 +1,219 @@
 <template>
-  <div class="debate-page">
-    <main class="debate-card">
-      <header class="page-header">
-        <h1>多智能体讨论助手</h1>
-        <p>输入问题后，系统会触发多智能体讨论并输出综合答案。</p>
-        <p class="endpoint">请求地址：{{ requestUrl }}</p>
-      </header>
+  <div class="chat-shell">
+    <aside class="sidebar" :class="{ open: sidebarOpen }">
+      <div class="sidebar-head">
+        <button class="new-chat-btn" type="button" @click="createNewConversation">
+          + 新对话
+        </button>
+      </div>
 
-      <section class="panel config-panel">
-        <h2>API 配置</h2>
-        <p class="config-hint">可在这里填写模型参数；留空时将使用后端环境变量。</p>
+      <div class="conversation-list">
+        <button
+          v-for="conversation in conversations"
+          :key="conversation.id"
+          class="conversation-item"
+          :class="{ active: conversation.id === activeConversationId }"
+          type="button"
+          @click="selectConversation(conversation.id)"
+        >
+          <span class="conversation-title">{{ conversation.title }}</span>
+          <span class="conversation-time">{{ formatTime(conversation.updatedAt) }}</span>
+          <span
+            class="delete-conversation"
+            @click.stop="removeConversation(conversation.id)"
+          >删除</span>
+        </button>
+      </div>
 
-        <div class="config-grid">
-          <label class="field">
-            <span>API Key</span>
-            <div class="input-row">
-              <input
-                v-model.trim="llmConfig.apiKey"
-                :type="showApiKey ? 'text' : 'password'"
-                class="text-input"
-                autocomplete="off"
-                :disabled="isLoading"
-                placeholder="例如：sk-..."
-              />
-              <button class="small-btn" type="button" @click="showApiKey = !showApiKey">
-                {{ showApiKey ? '隐藏' : '显示' }}
-              </button>
-            </div>
-          </label>
+      <details class="api-config-panel" open>
+        <summary>API 配置</summary>
 
-          <label class="field">
-            <span>Base URL</span>
+        <label class="config-label">
+          <span>API Key</span>
+          <div class="api-key-row">
             <input
-              v-model.trim="llmConfig.baseUrl"
-              class="text-input"
+              v-model.trim="llmConfig.apiKey"
+              :type="showApiKey ? 'text' : 'password'"
+              class="config-input"
+              placeholder="sk-..."
               autocomplete="off"
-              :disabled="isLoading"
-              placeholder="https://api.openai.com/v1"
-            />
-          </label>
+              :disabled="isSending"
+            >
+            <button class="ghost-btn" type="button" @click="showApiKey = !showApiKey">
+              {{ showApiKey ? '隐藏' : '显示' }}
+            </button>
+          </div>
+        </label>
 
-          <label class="field">
-            <span>Model</span>
-            <input
-              v-model.trim="llmConfig.model"
-              class="text-input"
-              autocomplete="off"
-              :disabled="isLoading"
-              placeholder="gpt-4o-mini"
-            />
-          </label>
-        </div>
+        <label class="config-label">
+          <span>Base URL</span>
+          <input
+            v-model.trim="llmConfig.baseUrl"
+            class="config-input"
+            placeholder="https://api.openai.com/v1"
+            autocomplete="off"
+            :disabled="isSending"
+          >
+        </label>
+
+        <label class="config-label">
+          <span>Model</span>
+          <input
+            v-model.trim="llmConfig.model"
+            class="config-input"
+            placeholder="gpt-4o-mini"
+            autocomplete="off"
+            :disabled="isSending"
+          >
+        </label>
 
         <div class="config-actions">
           <span class="config-state">{{ configStateText }}</span>
-          <button class="small-btn" type="button" @click="resetLlmConfig" :disabled="isLoading">
-            清空配置
+          <button class="ghost-btn" type="button" @click="clearLlmConfig" :disabled="isSending">
+            清空
           </button>
         </div>
-      </section>
+      </details>
+    </aside>
 
-      <form class="question-form" @submit.prevent="startDebate">
-        <label class="form-label" for="question-input">问题内容</label>
-        <textarea
-          id="question-input"
-          v-model.trim="question"
-          class="question-input"
-          :disabled="isLoading"
-          placeholder="例如：中小团队下一季度应优先投入性能优化还是功能迭代？"
-          rows="4"
-        />
-
-        <div class="form-actions">
-          <button class="submit-btn" type="submit" :disabled="isLoading || !question">
-            {{ isLoading ? '讨论中...' : '开始讨论' }}
-          </button>
-          <span class="state-tag" :class="`state-${requestState}`">{{ stateText }}</span>
+    <main class="main-panel">
+      <header class="main-header">
+        <button class="mobile-menu-btn" type="button" @click="sidebarOpen = !sidebarOpen">
+          菜单
+        </button>
+        <div class="header-title-wrap">
+          <h1>Chat</h1>
+          <span class="header-model">{{ currentModelLabel }}</span>
         </div>
-      </form>
+      </header>
 
-      <section v-if="isLoading" class="panel loading-panel" aria-live="polite">
-        <h2>处理中</h2>
-        <p>正在调用后端讨论接口，请稍候。</p>
-      </section>
+      <section ref="messageViewport" class="message-viewport">
+        <div v-if="showWelcome" class="welcome-panel">
+          <h2>今天想聊点什么？</h2>
+          <p>输入问题后，系统会执行多智能体讨论并给出综合答案。</p>
+          <div class="suggestion-grid">
+            <button
+              v-for="suggestion in suggestions"
+              :key="suggestion"
+              class="suggestion-btn"
+              type="button"
+              @click="useSuggestion(suggestion)"
+            >
+              {{ suggestion }}
+            </button>
+          </div>
+        </div>
 
-      <section v-else-if="requestState === 'error'" class="panel error-panel" role="alert">
-        <h2>请求失败</h2>
-        <p>{{ errorMessage }}</p>
-      </section>
+        <div v-else class="message-list">
+          <article
+            v-for="message in activeMessages"
+            :key="message.id"
+            class="message-row"
+            :class="message.role"
+          >
+            <div class="avatar">{{ message.role === 'user' ? '你' : 'AI' }}</div>
+            <div class="message-body">
+              <p class="message-content">{{ message.content }}</p>
 
-      <template v-else-if="requestState === 'success'">
-        <section class="panel records-panel">
-          <h2>多智能体讨论记录</h2>
-          <ul v-if="debateRecords.length" class="record-list">
-            <li v-for="(record, index) in debateRecords" :key="record.id" class="record-item">
-              <div class="record-meta">
-                <strong>{{ record.agent }}</strong>
-                <span v-if="record.round">第 {{ record.round }} 轮</span>
-                <span v-else>记录 {{ index + 1 }}</span>
+              <div v-if="message.pending" class="typing-dots" aria-label="AI 正在思考">
+                <span></span>
+                <span></span>
+                <span></span>
               </div>
-              <p class="record-content">{{ record.content }}</p>
-            </li>
-          </ul>
-          <p v-else class="empty-text">本次返回未包含讨论记录。</p>
-        </section>
 
-        <section class="panel answer-panel">
-          <h2>最终综合答案</h2>
-          <p class="answer-text">{{ finalAnswer }}</p>
-        </section>
-      </template>
+              <details v-if="message.transcript?.length" class="transcript-panel">
+                <summary>查看多智能体讨论过程</summary>
+                <ul>
+                  <li
+                    v-for="(turn, index) in message.transcript"
+                    :key="`${message.id}-${index}`"
+                  >
+                    <strong>第 {{ turn.round }} 轮 · {{ turn.role }}</strong>
+                    <p>{{ turn.content }}</p>
+                  </li>
+                </ul>
+              </details>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <footer class="composer-wrap">
+        <form class="composer" @submit.prevent="sendMessage">
+          <textarea
+            v-model.trim="composerText"
+            class="composer-input"
+            placeholder="给 Chat 发送消息..."
+            rows="1"
+            :disabled="isSending"
+            @keydown.enter.exact.prevent="sendMessage"
+          ></textarea>
+          <button class="send-btn" type="submit" :disabled="!canSend">
+            {{ isSending ? '发送中' : '发送' }}
+          </button>
+        </form>
+        <p v-if="requestError" class="error-tip">{{ requestError }}</p>
+      </footer>
     </main>
   </div>
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 
-const LLM_CONFIG_STORAGE_KEY = 'moa-llm-config:v1'
+const CONVERSATION_STORAGE_KEY = 'moa-chat-conversations:v1'
+const ACTIVE_STORAGE_KEY = 'moa-chat-active:v1'
+const LLM_CONFIG_STORAGE_KEY = 'moa-chat-llm-config:v1'
 
-const question = ref('')
-const requestState = ref('idle')
-const errorMessage = ref('')
-const debateRecords = ref([])
-const finalAnswer = ref('')
-const showApiKey = ref(false)
+const suggestions = [
+  '帮我制定一个可执行的学习计划',
+  '分析这个产品方向的风险和机会',
+  '给我一个从 0 到 1 的项目推进方案',
+  '如何在资源有限时做技术取舍'
+]
 
-const llmConfig = reactive(loadLlmConfig())
 const requestUrl = buildDebateUrl(import.meta.env.VITE_API_BASE_URL)
 
-const isLoading = computed(() => requestState.value === 'loading')
+const conversations = ref(loadConversations())
+const activeConversationId = ref(loadActiveConversationId(conversations.value))
+const composerText = ref('')
+const isSending = ref(false)
+const requestError = ref('')
+const sidebarOpen = ref(false)
+const showApiKey = ref(false)
+const messageViewport = ref(null)
 
-const stateText = computed(() => {
-  if (requestState.value === 'loading') return '加载中'
-  if (requestState.value === 'success') return '已完成'
-  if (requestState.value === 'error') return '失败'
-  return '待开始'
-})
+const llmConfig = reactive(loadLlmConfig())
+
+const activeConversation = computed(() =>
+  conversations.value.find((item) => item.id === activeConversationId.value) || null
+)
+
+const activeMessages = computed(() => activeConversation.value?.messages || [])
+
+const showWelcome = computed(() => !activeMessages.value.length)
+
+const canSend = computed(() => Boolean(composerText.value.trim()) && !isSending.value)
+
+const currentModelLabel = computed(() => llmConfig.model?.trim() || 'gpt-4o-mini')
 
 const configStateText = computed(() => {
   if (buildLlmPayload()) {
-    return '当前使用前端填写的 API 配置'
+    return '使用前端填写配置'
   }
-  return '当前使用后端环境变量配置'
+  return '使用后端环境变量'
+})
+
+watch(
+  conversations,
+  (value) => {
+    localStorage.setItem(CONVERSATION_STORAGE_KEY, JSON.stringify(value))
+  },
+  { deep: true }
+)
+
+watch(activeConversationId, (value) => {
+  localStorage.setItem(ACTIVE_STORAGE_KEY, value || '')
 })
 
 watch(
@@ -153,29 +224,13 @@ watch(
   { deep: true }
 )
 
-function loadLlmConfig() {
-  try {
-    const raw = localStorage.getItem(LLM_CONFIG_STORAGE_KEY)
-    if (!raw) {
-      return { apiKey: '', baseUrl: '', model: '' }
-    }
-
-    const parsed = JSON.parse(raw)
-    return {
-      apiKey: pickText(parsed?.apiKey),
-      baseUrl: pickText(parsed?.baseUrl),
-      model: pickText(parsed?.model)
-    }
-  } catch {
-    return { apiKey: '', baseUrl: '', model: '' }
+watch(
+  () => activeMessages.value.length,
+  async () => {
+    await nextTick()
+    scrollToBottom()
   }
-}
-
-function resetLlmConfig() {
-  llmConfig.apiKey = ''
-  llmConfig.baseUrl = ''
-  llmConfig.model = ''
-}
+)
 
 function buildDebateUrl(base) {
   const normalizedBase = String(base || '').trim().replace(/\/+$/, '')
@@ -188,485 +243,693 @@ function buildDebateUrl(base) {
   return `${normalizedBase}/api/debate/answer`
 }
 
-function pickText(value) {
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    return trimmed || ''
+function createId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
   }
-  if (typeof value === 'number') {
-    return String(value)
-  }
-  return ''
+  return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
-function pickFirstText(candidates) {
-  for (const candidate of candidates) {
-    const value = pickText(candidate)
-    if (value) {
-      return value
+function nowIso() {
+  return new Date().toISOString()
+}
+
+function formatTime(iso) {
+  try {
+    return new Date(iso).toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })
+  } catch {
+    return ''
+  }
+}
+
+function buildTitle(text) {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean) {
+    return '新对话'
+  }
+  return clean.length > 26 ? `${clean.slice(0, 26)}...` : clean
+}
+
+function loadConversations() {
+  try {
+    const raw = localStorage.getItem(CONVERSATION_STORAGE_KEY)
+    if (!raw) {
+      return []
+    }
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+    return parsed.map((item) => ({
+      id: item.id || createId(),
+      title: item.title || '新对话',
+      createdAt: item.createdAt || nowIso(),
+      updatedAt: item.updatedAt || nowIso(),
+      messages: Array.isArray(item.messages) ? item.messages : []
+    }))
+  } catch {
+    return []
+  }
+}
+
+function loadActiveConversationId(conversationList) {
+  const stored = localStorage.getItem(ACTIVE_STORAGE_KEY)
+  if (stored && conversationList.some((item) => item.id === stored)) {
+    return stored
+  }
+  return conversationList[0]?.id || ''
+}
+
+function loadLlmConfig() {
+  try {
+    const raw = localStorage.getItem(LLM_CONFIG_STORAGE_KEY)
+    if (!raw) {
+      return {
+        apiKey: '',
+        baseUrl: '',
+        model: ''
+      }
+    }
+    const parsed = JSON.parse(raw)
+    return {
+      apiKey: typeof parsed?.apiKey === 'string' ? parsed.apiKey : '',
+      baseUrl: typeof parsed?.baseUrl === 'string' ? parsed.baseUrl : '',
+      model: typeof parsed?.model === 'string' ? parsed.model : ''
+    }
+  } catch {
+    return {
+      apiKey: '',
+      baseUrl: '',
+      model: ''
     }
   }
-  return ''
 }
 
 function buildLlmPayload() {
   const payload = {}
+  const apiKey = llmConfig.apiKey.trim()
+  const baseUrl = llmConfig.baseUrl.trim()
+  const model = llmConfig.model.trim()
 
-  if (llmConfig.apiKey.trim()) {
-    payload.apiKey = llmConfig.apiKey.trim()
+  if (apiKey) {
+    payload.apiKey = apiKey
   }
-  if (llmConfig.baseUrl.trim()) {
-    payload.baseUrl = llmConfig.baseUrl.trim()
+  if (baseUrl) {
+    payload.baseUrl = baseUrl
   }
-  if (llmConfig.model.trim()) {
-    payload.model = llmConfig.model.trim()
+  if (model) {
+    payload.model = model
   }
 
   return Object.keys(payload).length ? payload : undefined
 }
 
-function unwrapPayload(payload) {
-  if (payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object') {
-    return payload.data
-  }
-  return payload
+function createNewConversation() {
+  const id = createId()
+  const time = nowIso()
+  conversations.value.unshift({
+    id,
+    title: '新对话',
+    createdAt: time,
+    updatedAt: time,
+    messages: []
+  })
+  activeConversationId.value = id
+  composerText.value = ''
+  requestError.value = ''
+  sidebarOpen.value = false
 }
 
-function normalizeRecord(rawRecord, index) {
-  if (typeof rawRecord === 'string') {
-    return {
-      id: `record-${index + 1}`,
-      agent: '智能体',
-      round: null,
-      content: rawRecord.trim()
-    }
+function selectConversation(id) {
+  activeConversationId.value = id
+  requestError.value = ''
+  sidebarOpen.value = false
+}
+
+function removeConversation(id) {
+  const nextList = conversations.value.filter((item) => item.id !== id)
+  conversations.value = nextList
+  if (activeConversationId.value === id) {
+    activeConversationId.value = nextList[0]?.id || ''
+  }
+}
+
+function clearLlmConfig() {
+  llmConfig.apiKey = ''
+  llmConfig.baseUrl = ''
+  llmConfig.model = ''
+}
+
+function useSuggestion(text) {
+  composerText.value = text
+  sendMessage()
+}
+
+function ensureActiveConversation(seedText) {
+  if (activeConversation.value) {
+    return activeConversation.value
   }
 
-  if (!rawRecord || typeof rawRecord !== 'object') {
-    return {
-      id: `record-${index + 1}`,
-      agent: `智能体${index + 1}`,
-      round: null,
-      content: ''
-    }
+  const id = createId()
+  const time = nowIso()
+  const item = {
+    id,
+    title: buildTitle(seedText),
+    createdAt: time,
+    updatedAt: time,
+    messages: []
   }
+  conversations.value.unshift(item)
+  activeConversationId.value = id
+  return item
+}
 
-  const roundValue = rawRecord.round ?? rawRecord.turn ?? rawRecord.step ?? rawRecord.index
-
+function createMessage(role, content, extra = {}) {
   return {
-    id: pickFirstText([rawRecord.id]) || `record-${index + 1}`,
-    agent:
-      pickFirstText([rawRecord.agent, rawRecord.agentName, rawRecord.speaker, rawRecord.role, rawRecord.name]) ||
-      `智能体${index + 1}`,
-    round: typeof roundValue === 'number' && Number.isFinite(roundValue) ? roundValue : null,
-    content: pickFirstText([
-      rawRecord.content,
-      rawRecord.text,
-      rawRecord.message,
-      rawRecord.answer,
-      rawRecord.opinion
-    ])
+    id: createId(),
+    role,
+    content,
+    createdAt: nowIso(),
+    ...extra
   }
 }
 
-function normalizeResponse(payload) {
-  const root = unwrapPayload(payload)
-
-  const recordsSource = [
-    root?.transcript,
-    root?.debateRecords,
-    root?.records,
-    root?.discussionRecords,
-    root?.discussion,
-    root?.messages,
-    root?.history,
-    payload?.transcript,
-    payload?.debateRecords,
-    payload?.records,
-    payload?.discussion,
-    payload?.messages
-  ].find((item) => Array.isArray(item))
-
-  const records = (Array.isArray(recordsSource) ? recordsSource : [])
-    .map((item, index) => normalizeRecord(item, index))
-    .filter((item) => item.content)
-
-  const answer = pickFirstText([
-    root?.finalAnswer,
-    root?.answer,
-    root?.result,
-    root?.summary,
-    payload?.finalAnswer,
-    payload?.answer,
-    payload?.result,
-    payload?.summary
-  ])
-
-  return {
-    records,
-    answer
+function scrollToBottom() {
+  if (!messageViewport.value) {
+    return
   }
+  messageViewport.value.scrollTop = messageViewport.value.scrollHeight
 }
 
-async function startDebate() {
-  const input = question.value.trim()
-  if (!input || isLoading.value) {
+async function sendMessage() {
+  const text = composerText.value.trim()
+  if (!text || isSending.value) {
     return
   }
 
-  requestState.value = 'loading'
-  errorMessage.value = ''
-  debateRecords.value = []
-  finalAnswer.value = ''
+  const conversation = ensureActiveConversation(text)
+  const userMessage = createMessage('user', text)
+  const pendingMessage = createMessage('assistant', '正在组织多智能体讨论...', { pending: true })
 
-  const requestBody = { question: input }
-  const llm = buildLlmPayload()
-  if (llm) {
-    requestBody.llm = llm
+  conversation.messages.push(userMessage)
+  conversation.messages.push(pendingMessage)
+  conversation.updatedAt = nowIso()
+  if (conversation.title === '新对话') {
+    conversation.title = buildTitle(text)
   }
 
+  composerText.value = ''
+  requestError.value = ''
+  isSending.value = true
+
   try {
+    const body = { question: text }
+    const llm = buildLlmPayload()
+    if (llm) {
+      body.llm = llm
+    }
+
     const response = await fetch(requestUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      credentials: 'include',
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(body)
     })
 
     const rawText = await response.text()
-    let payload = {}
-
-    if (rawText) {
-      try {
-        payload = JSON.parse(rawText)
-      } catch {
-        throw new Error('服务返回了无法解析的 JSON 数据。')
-      }
-    }
+    const payload = rawText ? JSON.parse(rawText) : {}
 
     if (!response.ok) {
-      const backendMessage = pickFirstText([payload?.message, payload?.error])
-      throw new Error(backendMessage || `请求失败（HTTP ${response.status}）。`)
+      throw new Error(payload?.message || `请求失败（HTTP ${response.status}）`)
     }
 
-    const normalized = normalizeResponse(payload)
+    const transcript = Array.isArray(payload?.transcript)
+      ? payload.transcript.map((item) => ({
+          round: Number(item?.round) || 0,
+          role: String(item?.role || '智能体'),
+          content: String(item?.content || '')
+        }))
+      : []
 
-    if (!normalized.answer) {
-      throw new Error('接口返回成功，但缺少最终综合答案。')
+    const finalAnswer = String(payload?.finalAnswer || '').trim()
+    if (!finalAnswer) {
+      throw new Error('接口返回成功，但未提供最终答案')
     }
 
-    debateRecords.value = normalized.records
-    finalAnswer.value = normalized.answer
-    requestState.value = 'success'
+    const index = conversation.messages.findIndex((item) => item.id === pendingMessage.id)
+    if (index >= 0) {
+      conversation.messages[index] = createMessage('assistant', finalAnswer, {
+        transcript
+      })
+    } else {
+      conversation.messages.push(
+        createMessage('assistant', finalAnswer, {
+          transcript
+        })
+      )
+    }
+
+    conversation.updatedAt = nowIso()
   } catch (error) {
-    requestState.value = 'error'
-    errorMessage.value = error instanceof Error ? error.message : '请求失败，请稍后重试。'
+    requestError.value = error instanceof Error ? error.message : '请求失败，请稍后重试'
+    const index = conversation.messages.findIndex((item) => item.id === pendingMessage.id)
+    if (index >= 0) {
+      conversation.messages.splice(index, 1)
+    }
+  } finally {
+    isSending.value = false
   }
 }
 </script>
 
 <style scoped>
-.debate-page {
-  min-height: 100vh;
-  padding: 24px 16px 40px;
-  display: flex;
-  justify-content: center;
-}
-
-.debate-card {
-  width: min(920px, 100%);
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 20px;
-  border: 1px solid rgba(10, 26, 36, 0.12);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 12px 40px rgba(26, 44, 58, 0.1);
-}
-
-.page-header h1 {
-  margin: 0;
-  font-size: clamp(1.5rem, 2.4vw, 2rem);
-}
-
-.page-header p {
-  margin: 8px 0 0;
-  color: #3b4d57;
-  line-height: 1.6;
-}
-
-.endpoint {
-  font-size: 0.86rem;
-  color: #5c707b;
-  word-break: break-all;
-}
-
-.panel {
-  border: 1px solid rgba(10, 26, 36, 0.1);
-  border-radius: 14px;
-  padding: 14px;
-  background: #ffffff;
-}
-
-.panel h2 {
-  margin: 0;
-  font-size: 1.04rem;
-}
-
-.panel p {
-  margin: 10px 0 0;
-  color: #2a3d47;
-  line-height: 1.6;
-}
-
-.config-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.config-hint {
-  margin: 0;
-  color: #5a6d77;
-  font-size: 0.88rem;
-}
-
-.config-grid {
+.chat-shell {
+  height: 100vh;
   display: grid;
-  gap: 10px;
+  grid-template-columns: 280px 1fr;
+  background: #0f1115;
+  color: #e8eaed;
 }
 
-.field {
+.sidebar {
+  background: #171a21;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 0.9rem;
-  color: #1d2a30;
+  min-height: 0;
 }
 
-.field span {
-  font-weight: 600;
+.sidebar-head {
+  padding: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.input-row {
+.new-chat-btn {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 10px;
+  background: transparent;
+  color: #e8eaed;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.new-chat-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.conversation-list {
+  flex: 1;
+  overflow: auto;
+  padding: 10px;
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.text-input {
+.conversation-item {
   width: 100%;
-  border: 1px solid rgba(10, 26, 36, 0.2);
-  border-radius: 12px;
-  padding: 10px 12px;
-  font: inherit;
-  color: #102028;
-  background: #ffffff;
+  text-align: left;
+  background: #20242d;
+  border: 1px solid transparent;
+  color: #e8eaed;
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
 }
 
-.text-input:focus {
+.conversation-item.active {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: #2a313d;
+}
+
+.conversation-title {
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation-time {
+  font-size: 0.75rem;
+  color: #a4adba;
+}
+
+.delete-conversation {
+  font-size: 0.74rem;
+  color: #f7a7a7;
+  justify-self: end;
+}
+
+.api-config-panel {
+  margin: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #20242d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.api-config-panel summary {
+  cursor: pointer;
+  font-size: 0.86rem;
+  color: #b9c3d2;
+}
+
+.config-label {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: #b9c3d2;
+}
+
+.api-key-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.config-input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #11151d;
+  color: #e8eaed;
+}
+
+.config-input:focus {
   outline: none;
-  border-color: #2c7da0;
-  box-shadow: 0 0 0 2px rgba(44, 125, 160, 0.2);
+  border-color: #85b4ff;
 }
 
 .config-actions {
+  margin-top: 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .config-state {
-  font-size: 0.84rem;
-  color: #425862;
+  font-size: 0.74rem;
+  color: #9aa4b4;
 }
 
-.small-btn {
-  border: 1px solid rgba(10, 26, 36, 0.18);
-  border-radius: 999px;
-  padding: 6px 12px;
-  background: #ffffff;
-  color: #1d2a30;
+.ghost-btn {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: transparent;
+  color: #e8eaed;
+  padding: 6px 10px;
   cursor: pointer;
 }
 
-.small-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.main-panel {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: #0f1115;
 }
 
-.question-form {
+.main-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.mobile-menu-btn {
+  display: none;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  background: transparent;
+  color: #e8eaed;
+  padding: 6px 10px;
+}
+
+.header-title-wrap {
+  display: flex;
+  align-items: center;
   gap: 10px;
 }
 
-.form-label {
-  font-size: 0.95rem;
+.header-title-wrap h1 {
+  margin: 0;
+  font-size: 1rem;
   font-weight: 600;
-  color: #1d2a30;
 }
 
-.question-input {
-  width: 100%;
-  border: 1px solid rgba(10, 26, 36, 0.2);
+.header-model {
+  font-size: 0.78rem;
+  color: #9aa4b4;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.message-viewport {
+  overflow: auto;
+  padding: 22px 20px;
+}
+
+.welcome-panel {
+  max-width: 760px;
+  margin: 40px auto;
+  text-align: center;
+}
+
+.welcome-panel h2 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.welcome-panel p {
+  color: #a7b1bf;
+  margin-top: 12px;
+}
+
+.suggestion-grid {
+  margin-top: 20px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.suggestion-btn {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: #1a1f28;
+  color: #d7dce5;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestion-btn:hover {
+  background: #222938;
+}
+
+.message-list {
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.message-row {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 10px;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 0.78rem;
+  background: #273245;
+  color: #d5dded;
+}
+
+.message-row.user .avatar {
+  background: #2f5bb6;
+}
+
+.message-body {
+  background: #171c24;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 12px;
-  font: inherit;
-  color: #102028;
-  background: #ffffff;
-  resize: vertical;
-  min-height: 110px;
 }
 
-.question-input:focus {
-  outline: none;
-  border-color: #2c7da0;
-  box-shadow: 0 0 0 2px rgba(44, 125, 160, 0.2);
+.message-row.user .message-body {
+  background: #1f2e4f;
 }
 
-.question-input:disabled,
-.text-input:disabled {
-  background: #f5f8fa;
+.message-content {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.68;
 }
 
-.form-actions {
-  display: flex;
-  align-items: center;
+.typing-dots {
+  margin-top: 10px;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b3bccb;
+  animation: blink 1.1s infinite ease-in-out;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.transcript-panel {
+  margin-top: 10px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.2);
+  padding-top: 8px;
+}
+
+.transcript-panel summary {
+  cursor: pointer;
+  color: #aeb8c7;
+  font-size: 0.85rem;
+}
+
+.transcript-panel ul {
+  margin: 10px 0 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.transcript-panel li {
+  color: #c7d0dd;
+}
+
+.transcript-panel li p {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  color: #dde3ee;
+}
+
+.composer-wrap {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 16px 18px 18px;
+  background: #0f1115;
+}
+
+.composer {
+  max-width: 860px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr auto;
   gap: 10px;
-  flex-wrap: wrap;
 }
 
-.submit-btn {
+.composer-input {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: #141922;
+  color: #e8eaed;
+  padding: 12px;
+  resize: none;
+  min-height: 52px;
+  max-height: 200px;
+}
+
+.composer-input:focus {
+  outline: none;
+  border-color: #85b4ff;
+}
+
+.send-btn {
   border: none;
-  border-radius: 999px;
-  padding: 10px 18px;
-  background: linear-gradient(120deg, #2c7da0, #3ba99c);
-  color: #f9fdff;
-  font-weight: 700;
+  border-radius: 10px;
+  background: #2f67ff;
+  color: white;
+  padding: 0 16px;
+  min-width: 84px;
   cursor: pointer;
 }
 
-.submit-btn:disabled {
-  opacity: 0.6;
+.send-btn:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-.state-tag {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 0.84rem;
-  border: 1px solid transparent;
+.error-tip {
+  max-width: 860px;
+  margin: 8px auto 0;
+  color: #ff9b9b;
+  font-size: 0.85rem;
 }
 
-.state-idle {
-  background: rgba(99, 110, 114, 0.12);
-  color: #54616a;
-  border-color: rgba(99, 110, 114, 0.25);
-}
-
-.state-loading {
-  background: rgba(44, 125, 160, 0.12);
-  color: #1d5e78;
-  border-color: rgba(44, 125, 160, 0.3);
-}
-
-.state-success {
-  background: rgba(46, 139, 87, 0.14);
-  color: #216240;
-  border-color: rgba(46, 139, 87, 0.3);
-}
-
-.state-error {
-  background: rgba(214, 40, 40, 0.12);
-  color: #8e1a1a;
-  border-color: rgba(214, 40, 40, 0.28);
-}
-
-.loading-panel {
-  border-color: rgba(44, 125, 160, 0.25);
-  background: rgba(44, 125, 160, 0.06);
-}
-
-.error-panel {
-  border-color: rgba(214, 40, 40, 0.3);
-  background: rgba(214, 40, 40, 0.06);
-}
-
-.record-list {
-  list-style: none;
-  padding: 0;
-  margin: 12px 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.record-item {
-  border: 1px solid rgba(10, 26, 36, 0.12);
-  border-radius: 10px;
-  padding: 10px;
-  background: #f9fbfc;
-}
-
-.record-meta {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  font-size: 0.86rem;
-  color: #425862;
-}
-
-.record-content {
-  margin: 8px 0 0;
-  white-space: pre-wrap;
-  color: #172b34;
-}
-
-.empty-text {
-  margin-top: 12px;
-  color: #51646e;
-}
-
-.answer-panel {
-  border-color: rgba(46, 139, 87, 0.26);
-  background: rgba(46, 139, 87, 0.06);
-}
-
-.answer-text {
-  white-space: pre-wrap;
-  font-size: 1rem;
-}
-
-@media (max-width: 640px) {
-  .debate-page {
-    padding: 16px 12px 24px;
+@media (max-width: 960px) {
+  .chat-shell {
+    grid-template-columns: 1fr;
   }
 
-  .debate-card {
-    padding: 14px;
-    border-radius: 12px;
+  .sidebar {
+    position: fixed;
+    z-index: 30;
+    inset: 0 auto 0 0;
+    width: min(82vw, 320px);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0);
   }
 
-  .form-actions,
-  .config-actions {
-    align-items: stretch;
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
   }
 
-  .submit-btn,
-  .small-btn {
-    width: 100%;
-    text-align: center;
+  .mobile-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  .input-row {
-    flex-direction: column;
+  .suggestion-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
