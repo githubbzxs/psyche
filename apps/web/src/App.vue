@@ -1,22 +1,67 @@
-﻿<template>
+<template>
   <div class="debate-page">
     <main class="debate-card">
       <header class="page-header">
         <h1>多智能体讨论助手</h1>
-        <p>输入问题后，系统会向后端发起讨论并返回综合答案。</p>
-        <p class="endpoint">
-          请求地址：{{ requestUrl }}
-        </p>
+        <p>输入问题后，系统会触发多智能体讨论并输出综合答案。</p>
+        <p class="endpoint">请求地址：{{ requestUrl }}</p>
       </header>
 
-      <form
-        class="question-form"
-        @submit.prevent="startDebate"
-      >
-        <label
-          class="form-label"
-          for="question-input"
-        >问题内容</label>
+      <section class="panel config-panel">
+        <h2>API 配置</h2>
+        <p class="config-hint">可在这里填写模型参数；留空时将使用后端环境变量。</p>
+
+        <div class="config-grid">
+          <label class="field">
+            <span>API Key</span>
+            <div class="input-row">
+              <input
+                v-model.trim="llmConfig.apiKey"
+                :type="showApiKey ? 'text' : 'password'"
+                class="text-input"
+                autocomplete="off"
+                :disabled="isLoading"
+                placeholder="例如：sk-..."
+              />
+              <button class="small-btn" type="button" @click="showApiKey = !showApiKey">
+                {{ showApiKey ? '隐藏' : '显示' }}
+              </button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Base URL</span>
+            <input
+              v-model.trim="llmConfig.baseUrl"
+              class="text-input"
+              autocomplete="off"
+              :disabled="isLoading"
+              placeholder="https://api.openai.com/v1"
+            />
+          </label>
+
+          <label class="field">
+            <span>Model</span>
+            <input
+              v-model.trim="llmConfig.model"
+              class="text-input"
+              autocomplete="off"
+              :disabled="isLoading"
+              placeholder="gpt-4o-mini"
+            />
+          </label>
+        </div>
+
+        <div class="config-actions">
+          <span class="config-state">{{ configStateText }}</span>
+          <button class="small-btn" type="button" @click="resetLlmConfig" :disabled="isLoading">
+            清空配置
+          </button>
+        </div>
+      </section>
+
+      <form class="question-form" @submit.prevent="startDebate">
+        <label class="form-label" for="question-input">问题内容</label>
         <textarea
           id="question-input"
           v-model.trim="question"
@@ -27,34 +72,19 @@
         />
 
         <div class="form-actions">
-          <button
-            class="submit-btn"
-            type="submit"
-            :disabled="isLoading || !question"
-          >
+          <button class="submit-btn" type="submit" :disabled="isLoading || !question">
             {{ isLoading ? '讨论中...' : '开始讨论' }}
           </button>
-          <span
-            class="state-tag"
-            :class="`state-${requestState}`"
-          >{{ stateText }}</span>
+          <span class="state-tag" :class="`state-${requestState}`">{{ stateText }}</span>
         </div>
       </form>
 
-      <section
-        v-if="isLoading"
-        class="panel loading-panel"
-        aria-live="polite"
-      >
+      <section v-if="isLoading" class="panel loading-panel" aria-live="polite">
         <h2>处理中</h2>
         <p>正在调用后端讨论接口，请稍候。</p>
       </section>
 
-      <section
-        v-else-if="requestState === 'error'"
-        class="panel error-panel"
-        role="alert"
-      >
+      <section v-else-if="requestState === 'error'" class="panel error-panel" role="alert">
         <h2>请求失败</h2>
         <p>{{ errorMessage }}</p>
       </section>
@@ -62,38 +92,22 @@
       <template v-else-if="requestState === 'success'">
         <section class="panel records-panel">
           <h2>多智能体讨论记录</h2>
-          <ul
-            v-if="debateRecords.length"
-            class="record-list"
-          >
-            <li
-              v-for="(record, index) in debateRecords"
-              :key="record.id"
-              class="record-item"
-            >
+          <ul v-if="debateRecords.length" class="record-list">
+            <li v-for="(record, index) in debateRecords" :key="record.id" class="record-item">
               <div class="record-meta">
                 <strong>{{ record.agent }}</strong>
                 <span v-if="record.round">第 {{ record.round }} 轮</span>
                 <span v-else>记录 {{ index + 1 }}</span>
               </div>
-              <p class="record-content">
-                {{ record.content }}
-              </p>
+              <p class="record-content">{{ record.content }}</p>
             </li>
           </ul>
-          <p
-            v-else
-            class="empty-text"
-          >
-            本次返回未包含讨论记录。
-          </p>
+          <p v-else class="empty-text">本次返回未包含讨论记录。</p>
         </section>
 
         <section class="panel answer-panel">
           <h2>最终综合答案</h2>
-          <p class="answer-text">
-            {{ finalAnswer }}
-          </p>
+          <p class="answer-text">{{ finalAnswer }}</p>
         </section>
       </template>
     </main>
@@ -101,14 +115,18 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
+
+const LLM_CONFIG_STORAGE_KEY = 'moa-llm-config:v1'
 
 const question = ref('')
 const requestState = ref('idle')
 const errorMessage = ref('')
 const debateRecords = ref([])
 const finalAnswer = ref('')
+const showApiKey = ref(false)
 
+const llmConfig = reactive(loadLlmConfig())
 const requestUrl = buildDebateUrl(import.meta.env.VITE_API_BASE_URL)
 
 const isLoading = computed(() => requestState.value === 'loading')
@@ -119,6 +137,45 @@ const stateText = computed(() => {
   if (requestState.value === 'error') return '失败'
   return '待开始'
 })
+
+const configStateText = computed(() => {
+  if (buildLlmPayload()) {
+    return '当前使用前端填写的 API 配置'
+  }
+  return '当前使用后端环境变量配置'
+})
+
+watch(
+  llmConfig,
+  (value) => {
+    localStorage.setItem(LLM_CONFIG_STORAGE_KEY, JSON.stringify(value))
+  },
+  { deep: true }
+)
+
+function loadLlmConfig() {
+  try {
+    const raw = localStorage.getItem(LLM_CONFIG_STORAGE_KEY)
+    if (!raw) {
+      return { apiKey: '', baseUrl: '', model: '' }
+    }
+
+    const parsed = JSON.parse(raw)
+    return {
+      apiKey: pickText(parsed?.apiKey),
+      baseUrl: pickText(parsed?.baseUrl),
+      model: pickText(parsed?.model)
+    }
+  } catch {
+    return { apiKey: '', baseUrl: '', model: '' }
+  }
+}
+
+function resetLlmConfig() {
+  llmConfig.apiKey = ''
+  llmConfig.baseUrl = ''
+  llmConfig.model = ''
+}
 
 function buildDebateUrl(base) {
   const normalizedBase = String(base || '').trim().replace(/\/+$/, '')
@@ -150,6 +207,22 @@ function pickFirstText(candidates) {
     }
   }
   return ''
+}
+
+function buildLlmPayload() {
+  const payload = {}
+
+  if (llmConfig.apiKey.trim()) {
+    payload.apiKey = llmConfig.apiKey.trim()
+  }
+  if (llmConfig.baseUrl.trim()) {
+    payload.baseUrl = llmConfig.baseUrl.trim()
+  }
+  if (llmConfig.model.trim()) {
+    payload.model = llmConfig.model.trim()
+  }
+
+  return Object.keys(payload).length ? payload : undefined
 }
 
 function unwrapPayload(payload) {
@@ -200,12 +273,14 @@ function normalizeResponse(payload) {
   const root = unwrapPayload(payload)
 
   const recordsSource = [
+    root?.transcript,
     root?.debateRecords,
     root?.records,
     root?.discussionRecords,
     root?.discussion,
     root?.messages,
     root?.history,
+    payload?.transcript,
     payload?.debateRecords,
     payload?.records,
     payload?.discussion,
@@ -244,6 +319,12 @@ async function startDebate() {
   debateRecords.value = []
   finalAnswer.value = ''
 
+  const requestBody = { question: input }
+  const llm = buildLlmPayload()
+  if (llm) {
+    requestBody.llm = llm
+  }
+
   try {
     const response = await fetch(requestUrl, {
       method: 'POST',
@@ -251,7 +332,7 @@ async function startDebate() {
         'Content-Type': 'application/json'
       },
       credentials: 'include',
-      body: JSON.stringify({ question: input })
+      body: JSON.stringify(requestBody)
     })
 
     const rawText = await response.text()
@@ -260,7 +341,7 @@ async function startDebate() {
     if (rawText) {
       try {
         payload = JSON.parse(rawText)
-      } catch (error) {
+      } catch {
         throw new Error('服务返回了无法解析的 JSON 数据。')
       }
     }
@@ -323,6 +404,101 @@ async function startDebate() {
   word-break: break-all;
 }
 
+.panel {
+  border: 1px solid rgba(10, 26, 36, 0.1);
+  border-radius: 14px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 1.04rem;
+}
+
+.panel p {
+  margin: 10px 0 0;
+  color: #2a3d47;
+  line-height: 1.6;
+}
+
+.config-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.config-hint {
+  margin: 0;
+  color: #5a6d77;
+  font-size: 0.88rem;
+}
+
+.config-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: #1d2a30;
+}
+
+.field span {
+  font-weight: 600;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.text-input {
+  width: 100%;
+  border: 1px solid rgba(10, 26, 36, 0.2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font: inherit;
+  color: #102028;
+  background: #ffffff;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: #2c7da0;
+  box-shadow: 0 0 0 2px rgba(44, 125, 160, 0.2);
+}
+
+.config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.config-state {
+  font-size: 0.84rem;
+  color: #425862;
+}
+
+.small-btn {
+  border: 1px solid rgba(10, 26, 36, 0.18);
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #ffffff;
+  color: #1d2a30;
+  cursor: pointer;
+}
+
+.small-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .question-form {
   display: flex;
   flex-direction: column;
@@ -353,7 +529,8 @@ async function startDebate() {
   box-shadow: 0 0 0 2px rgba(44, 125, 160, 0.2);
 }
 
-.question-input:disabled {
+.question-input:disabled,
+.text-input:disabled {
   background: #f5f8fa;
 }
 
@@ -410,24 +587,6 @@ async function startDebate() {
   background: rgba(214, 40, 40, 0.12);
   color: #8e1a1a;
   border-color: rgba(214, 40, 40, 0.28);
-}
-
-.panel {
-  border: 1px solid rgba(10, 26, 36, 0.1);
-  border-radius: 14px;
-  padding: 14px;
-  background: #ffffff;
-}
-
-.panel h2 {
-  margin: 0;
-  font-size: 1.04rem;
-}
-
-.panel p {
-  margin: 10px 0 0;
-  color: #2a3d47;
-  line-height: 1.6;
 }
 
 .loading-panel {
@@ -495,13 +654,19 @@ async function startDebate() {
     border-radius: 12px;
   }
 
-  .form-actions {
+  .form-actions,
+  .config-actions {
     align-items: stretch;
   }
 
-  .submit-btn {
+  .submit-btn,
+  .small-btn {
     width: 100%;
     text-align: center;
+  }
+
+  .input-row {
+    flex-direction: column;
   }
 }
 </style>

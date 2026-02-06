@@ -7,6 +7,12 @@ export interface LlmMessage {
   content: string
 }
 
+export interface LlmRuntimeConfig {
+  apiKey?: string
+  baseUrl?: string
+  model?: string
+}
+
 const llmResponseSchema = z.object({
   choices: z
     .array(
@@ -33,18 +39,19 @@ class HttpStatusError extends Error {
  */
 export async function callOpenAiCompatible(
   messages: LlmMessage[],
-  temperature = 0.6
+  temperature = 0.6,
+  runtimeConfig?: LlmRuntimeConfig
 ): Promise<string> {
-  const apiKey = process.env.LLM_API_KEY?.trim()
+  const apiKey = runtimeConfig?.apiKey?.trim() || process.env.LLM_API_KEY?.trim()
   if (!apiKey) {
     throw new HttpStatusError(500, '服务端未配置 LLM_API_KEY')
   }
 
-  const baseUrl = (process.env.LLM_BASE_URL?.trim() || 'https://api.openai.com/v1').replace(
-    /\/+$/,
-    ''
-  )
-  const model = process.env.LLM_MODEL?.trim() || 'gpt-4o-mini'
+  const baseUrl = (
+    runtimeConfig?.baseUrl?.trim() || process.env.LLM_BASE_URL?.trim() || 'https://api.openai.com/v1'
+  ).replace(/\/+$/, '')
+
+  const model = runtimeConfig?.model?.trim() || process.env.LLM_MODEL?.trim() || 'gpt-4o-mini'
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 60_000)
@@ -101,6 +108,7 @@ async function readJsonSafe(response: Response): Promise<unknown> {
   if (!text) {
     return null
   }
+
   try {
     return JSON.parse(text)
   } catch {
@@ -112,6 +120,7 @@ function extractErrorMessage(payload: unknown): string | null {
   if (typeof payload === 'string' && payload.trim()) {
     return payload.trim()
   }
+
   if (!payload || typeof payload !== 'object') {
     return null
   }
@@ -123,6 +132,7 @@ function extractErrorMessage(payload: unknown): string | null {
       })
     })
     .safeParse(payload)
+
   if (openAiShape.success) {
     return openAiShape.data.error.message
   }
@@ -132,6 +142,7 @@ function extractErrorMessage(payload: unknown): string | null {
       message: z.string()
     })
     .safeParse(payload)
+
   if (messageShape.success) {
     return messageShape.data.message
   }
@@ -141,6 +152,7 @@ function extractErrorMessage(payload: unknown): string | null {
       raw: z.string()
     })
     .safeParse(payload)
+
   if (rawShape.success) {
     return rawShape.data.raw.slice(0, 300)
   }

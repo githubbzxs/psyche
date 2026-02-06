@@ -1,9 +1,26 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { callOpenAiCompatible, type LlmMessage } from '../lib/llm.js'
+import {
+  callOpenAiCompatible,
+  type LlmMessage,
+  type LlmRuntimeConfig
+} from '../lib/llm.js'
+
+const llmConfigSchema = z
+  .object({
+    apiKey: z.string().trim().min(1, 'llm.apiKey 不能为空').max(300, 'llm.apiKey 过长').optional(),
+    baseUrl: z.string().trim().url('llm.baseUrl 必须是合法 URL').optional(),
+    model: z.string().trim().min(1, 'llm.model 不能为空').max(200, 'llm.model 过长').optional()
+  })
+  .strict()
 
 const debateAnswerSchema = z.object({
-  question: z.string().trim().min(1, 'question 不能为空').max(4000, 'question 长度不能超过 4000')
+  question: z
+    .string()
+    .trim()
+    .min(1, 'question 不能为空')
+    .max(4000, 'question 长度不能超过 4000'),
+  llm: llmConfigSchema.optional()
 })
 
 type DebateRoleId = 'analyst' | 'challenger' | 'integrator'
@@ -43,10 +60,15 @@ export async function debateRoutes(app: FastifyInstance) {
   app.post('/debate/answer', async (request) => {
     const body = debateAnswerSchema.parse(request.body)
     const question = body.question.trim()
+    const runtimeConfig = normalizeRuntimeConfig(body.llm)
     const transcript: DebateTurn[] = []
 
     for (const role of debateRoles) {
-      const content = await callOpenAiCompatible(buildRoundOnePrompt(question, role), 0.7)
+      const content = await callOpenAiCompatible(
+        buildRoundOnePrompt(question, role),
+        0.7,
+        runtimeConfig
+      )
       transcript.push({
         round: 1,
         roleId: role.id,
@@ -59,7 +81,8 @@ export async function debateRoutes(app: FastifyInstance) {
       const roundOneOthers = transcript.filter((item) => item.round === 1 && item.roleId !== role.id)
       const content = await callOpenAiCompatible(
         buildRoundTwoPrompt(question, role, roundOneOthers),
-        0.7
+        0.7,
+        runtimeConfig
       )
       transcript.push({
         round: 2,
@@ -69,7 +92,11 @@ export async function debateRoutes(app: FastifyInstance) {
       })
     }
 
-    const finalAnswer = await callOpenAiCompatible(buildFinalPrompt(question, transcript), 0.3)
+    const finalAnswer = await callOpenAiCompatible(
+      buildFinalPrompt(question, transcript),
+      0.3,
+      runtimeConfig
+    )
 
     return {
       question,
@@ -81,6 +108,24 @@ export async function debateRoutes(app: FastifyInstance) {
       finalAnswer
     }
   })
+}
+
+function normalizeRuntimeConfig(llm?: z.infer<typeof llmConfigSchema>): LlmRuntimeConfig | undefined {
+  if (!llm) {
+    return undefined
+  }
+
+  const config: LlmRuntimeConfig = {
+    apiKey: llm.apiKey,
+    baseUrl: llm.baseUrl,
+    model: llm.model
+  }
+
+  if (!config.apiKey && !config.baseUrl && !config.model) {
+    return undefined
+  }
+
+  return config
 }
 
 function buildRoundOnePrompt(question: string, role: DebateRole): LlmMessage[] {
@@ -120,7 +165,7 @@ function buildRoundTwoPrompt(question: string, role: DebateRole, roundOneOthers:
         '以下是第 1 轮其他角色观点，请你回应：',
         referenceText,
         '第 2 轮要求：',
-        '1) 必须引用至少 1 条其他角色观点，格式为「引用[角色名]: ...」；',
+        '1) 必须引用至少 1 条其他角色观点，格式用「引用[角色名]: ...」；',
         '2) 明确说明你同意或反对的点；',
         '3) 给出你修正后的结论。'
       ].join('\n')

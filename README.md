@@ -32,13 +32,28 @@
 4. 前端地址：`http://localhost:3000`
 5. 后端接口：`POST http://localhost:8080/api/debate/answer`
 
+前端页面已提供 API 配置区，可直接填写 `API Key`、`Base URL`、`Model` 后发起请求。
+
 ## 接口说明
 
-请求体：
+请求体（最简）：
 
 ```json
 {
   "question": "你的问题"
+}
+```
+
+请求体（带运行时模型配置）：
+
+```json
+{
+  "question": "你的问题",
+  "llm": {
+    "apiKey": "sk-...",
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini"
+  }
 }
 ```
 
