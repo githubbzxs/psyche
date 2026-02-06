@@ -845,7 +845,7 @@ export default function Page() {
             </button>
           ) : null}
           <div className="cgpt-main-title">
-            <h1>ChatGPT</h1>
+            <h1>psyche</h1>
           </div>
         </header>
 
