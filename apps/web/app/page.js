@@ -105,14 +105,14 @@ function normalizeAgents(raw, defaultModel = "gpt-4o-mini") {
 function parseAnswer(payload) {
   if (typeof payload?.finalAnswer === "string" && payload.finalAnswer.trim()) {
     return {
-      text: payload.finalAnswer.trim(),
+      text: normalizeAssistantText(payload.finalAnswer),
       transcript: Array.isArray(payload?.transcript) ? payload.transcript : []
     }
   }
 
   if (typeof payload?.answer === "string" && payload.answer.trim()) {
     return {
-      text: payload.answer.trim(),
+      text: normalizeAssistantText(payload.answer),
       transcript: Array.isArray(payload?.transcript) ? payload.transcript : []
     }
   }
@@ -123,7 +123,7 @@ function parseAnswer(payload) {
         .map((item) => {
           const role = typeof item?.role === "string" ? item.role : "agent"
           const content = typeof item?.content === "string" ? item.content : ""
-          return `${role}: ${content}`
+          return `${role}: ${normalizeAssistantText(content)}`
         })
         .join("\n\n"),
       transcript: payload.transcript
@@ -134,6 +134,22 @@ function parseAnswer(payload) {
     text: "Request succeeded, but no readable answer in response.",
     transcript: []
   }
+}
+
+function normalizeAssistantText(text) {
+  if (typeof text !== "string") {
+    return ""
+  }
+
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, "$1（$2）")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "• ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
 }
 
 function formatTime(timestamp) {

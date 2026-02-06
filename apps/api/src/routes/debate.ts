@@ -234,7 +234,8 @@ function buildFinalPrompt(question: string, transcript: DebateTurn[]): LlmMessag
   return [
     {
       role: 'system',
-      content: '你是最终裁决模型。请基于完整讨论记录，输出清晰、可执行的最终结论。'
+      content:
+        '你是最终裁决模型。请基于完整讨论记录，给出准确、可执行的最终回复。必须使用自然中文，不要使用 Markdown 语法、标题、加粗标记或代码块。'
     },
     {
       role: 'user',
@@ -242,10 +243,11 @@ function buildFinalPrompt(question: string, transcript: DebateTurn[]): LlmMessag
         `问题：${question}`,
         '讨论记录：',
         formatTranscript(transcript),
-        '请输出：',
-        '1) 最终答案（先给结论）；',
-        '2) 关键依据（2-4 条）；',
-        '3) 适用边界与风险提示（1-2 条）。'
+        '请按以下要求直接输出完整答复：',
+        '1) 像常规 AI 助手一样自然表达，不出现 #、*、` 等 Markdown 标记；',
+        '2) 先给明确结论，再给 2-4 条关键依据；',
+        '3) 最后给 1-2 条适用边界或风险提示；',
+        '4) 不要输出“第1部分/第2部分”这类模板标题。'
       ].join('\n')
     }
   ]
