@@ -6,6 +6,8 @@ const LLM_CONFIG_KEY = "moa.llm.config.v1"
 const AGENT_CONFIG_KEY = "moa.agent.config.v1"
 const SESSIONS_KEY = "moa.chat.sessions.v1"
 const ACTIVE_SESSION_KEY = "moa.chat.active.v1"
+const WELCOME_MESSAGE = "Hi, ask anything. I will run multi-agent debate and return one final answer."
+const MAX_CONTEXT_MESSAGES = 12
 
 function uid() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -29,12 +31,7 @@ function createSession() {
     id: uid(),
     title: "New chat",
     createdAt: Date.now(),
-    messages: [
-      createMessage(
-        "assistant",
-        "Hi, ask anything. I will run multi-agent debate and return one final answer."
-      )
-    ]
+    messages: [createMessage("assistant", WELCOME_MESSAGE)]
   }
 }
 
@@ -150,6 +147,31 @@ function normalizeAssistantText(text) {
     .replace(/^\s*[-*]\s+/gm, "• ")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
+}
+
+function buildConversationHistory(messages) {
+  if (!Array.isArray(messages)) {
+    return []
+  }
+
+  return messages
+    .filter(
+      (item) =>
+        item &&
+        (item.role === "user" || item.role === "assistant") &&
+        !item.loading &&
+        !item.isError &&
+        typeof item.content === "string" &&
+        item.content.trim()
+    )
+    .filter(
+      (item) => !(item.role === "assistant" && item.content.trim() === WELCOME_MESSAGE)
+    )
+    .slice(-MAX_CONTEXT_MESSAGES)
+    .map((item) => ({
+      role: item.role,
+      content: item.content.trim()
+    }))
 }
 
 function formatTime(timestamp) {
@@ -535,6 +557,7 @@ export default function Page() {
 
       const payload = {
         question: text,
+        history: buildConversationHistory(currentMessages),
         llm: {
           apiKey: llmConfig.apiKey.trim(),
           baseUrl: llmConfig.baseUrl.trim(),

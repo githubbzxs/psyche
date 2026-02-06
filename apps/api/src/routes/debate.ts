@@ -27,6 +27,17 @@ const debateAgentSchema = z
   })
   .strict()
 
+const debateHistoryItemSchema = z
+  .object({
+    role: z.enum(['user', 'assistant']),
+    content: z
+      .string()
+      .trim()
+      .min(1, 'history[].content 不能为空')
+      .max(4000, 'history[].content 过长')
+  })
+  .strict()
+
 const debateAnswerSchema = z.object({
   question: z
     .string()
@@ -38,7 +49,8 @@ const debateAnswerSchema = z.object({
     .array(debateAgentSchema)
     .min(2, 'agents 至少需要 2 个智能体')
     .max(8, 'agents 最多支持 8 个智能体')
-    .optional()
+    .optional(),
+  history: z.array(debateHistoryItemSchema).max(20, 'history 最多保留 20 条').optional()
 })
 
 interface DebateRole {
@@ -52,6 +64,11 @@ interface DebateTurn {
   round: 1 | 2
   roleId: string
   role: string
+  content: string
+}
+
+interface ConversationHistoryItem {
+  role: 'user' | 'assistant'
   content: string
 }
 
@@ -78,13 +95,15 @@ export async function debateRoutes(app: FastifyInstance) {
     const body = debateAnswerSchema.parse(request.body)
     const question = body.question.trim()
     const runtimeConfig = normalizeRuntimeConfig(body.llm)
+    const history = normalizeConversationHistory(body.history)
+    const historyText = formatConversationHistory(history)
     const debateRoles = resolveDebateRoles(body.agents)
     const transcript: DebateTurn[] = []
 
     for (const role of debateRoles) {
       const roleConfig = mergeRuntimeConfig(role.runtimeConfig, runtimeConfig)
       const content = await callOpenAiCompatible(
-        buildRoundOnePrompt(question, role),
+        buildRoundOnePrompt(question, role, historyText),
         0.7,
         roleConfig
       )
@@ -100,7 +119,7 @@ export async function debateRoutes(app: FastifyInstance) {
       const roundOneOthers = transcript.filter((item) => item.round === 1 && item.roleId !== role.id)
       const roleConfig = mergeRuntimeConfig(role.runtimeConfig, runtimeConfig)
       const content = await callOpenAiCompatible(
-        buildRoundTwoPrompt(question, role, roundOneOthers),
+        buildRoundTwoPrompt(question, role, roundOneOthers, historyText),
         0.7,
         roleConfig
       )
@@ -115,7 +134,7 @@ export async function debateRoutes(app: FastifyInstance) {
     const finalRoleConfig = debateRoles.length > 0 ? debateRoles[debateRoles.length - 1].runtimeConfig : undefined
     const finalRuntimeConfig = mergeRuntimeConfig(finalRoleConfig, runtimeConfig)
     const finalAnswer = await callOpenAiCompatible(
-      buildFinalPrompt(question, transcript),
+      buildFinalPrompt(question, transcript, historyText),
       0.3,
       finalRuntimeConfig
     )
@@ -185,15 +204,42 @@ function mergeRuntimeConfig(
   return merged
 }
 
-function buildRoundOnePrompt(question: string, role: DebateRole): LlmMessage[] {
+function normalizeConversationHistory(
+  history?: z.infer<typeof debateHistoryItemSchema>[]
+): ConversationHistoryItem[] {
+  if (!history || history.length === 0) {
+    return []
+  }
+
+  return history
+    .map((item) => ({
+      role: item.role,
+      content: item.content.trim()
+    }))
+    .filter((item) => item.content.length > 0)
+    .slice(-12)
+}
+
+function formatConversationHistory(history: ConversationHistoryItem[]): string {
+  if (history.length === 0) {
+    return '（无）'
+  }
+
+  return history
+    .map((item) => `${item.role === 'user' ? '用户' : '助手'}：${item.content}`)
+    .join('\n')
+}
+
+function buildRoundOnePrompt(question: string, role: DebateRole, historyText: string): LlmMessage[] {
   return [
     {
       role: 'system',
-      content: `你是多角色辩论中的「${role.name}」，职责：${role.responsibility}。请用简洁、结构化中文回答。`
+      content: `你是多角色辩论中的「${role.name}」，职责：${role.responsibility}。请用简洁、结构化中文回答，并优先理解对话上下文中的指代关系。`
     },
     {
       role: 'user',
       content: [
+        `历史对话（按时间顺序）：\n${historyText}`,
         '请进行第 1 轮发言。',
         `问题：${question}`,
         '要求：',
@@ -205,7 +251,12 @@ function buildRoundOnePrompt(question: string, role: DebateRole): LlmMessage[] {
   ]
 }
 
-function buildRoundTwoPrompt(question: string, role: DebateRole, roundOneOthers: DebateTurn[]): LlmMessage[] {
+function buildRoundTwoPrompt(
+  question: string,
+  role: DebateRole,
+  roundOneOthers: DebateTurn[],
+  historyText: string
+): LlmMessage[] {
   const referenceText = roundOneOthers
     .map((item) => `- ${item.role}：${item.content}`)
     .join('\n')
@@ -218,6 +269,7 @@ function buildRoundTwoPrompt(question: string, role: DebateRole, roundOneOthers:
     {
       role: 'user',
       content: [
+        `历史对话（按时间顺序）：\n${historyText}`,
         `问题：${question}`,
         '以下是第 1 轮其他角色观点，请你回应：',
         referenceText,
@@ -230,24 +282,25 @@ function buildRoundTwoPrompt(question: string, role: DebateRole, roundOneOthers:
   ]
 }
 
-function buildFinalPrompt(question: string, transcript: DebateTurn[]): LlmMessage[] {
+function buildFinalPrompt(question: string, transcript: DebateTurn[], historyText: string): LlmMessage[] {
   return [
     {
       role: 'system',
       content:
-        '你是最终裁决模型。请基于完整讨论记录，给出准确、可执行的最终回复。必须使用自然中文，不要使用 Markdown 语法、标题、加粗标记或代码块。'
+        '你是最终裁决模型。请基于历史对话与完整讨论记录，给出准确、自然、可执行的最终回复。若用户是追问（如“那btc吧”“多少钱”），必须先结合上下文确定对象后再作答。'
     },
     {
       role: 'user',
       content: [
         `问题：${question}`,
+        `历史对话（按时间顺序）：\n${historyText}`,
         '讨论记录：',
         formatTranscript(transcript),
         '请按以下要求直接输出完整答复：',
-        '1) 像常规 AI 助手一样自然表达，不出现 #、*、` 等 Markdown 标记；',
-        '2) 先给明确结论，再给 2-4 条关键依据；',
-        '3) 最后给 1-2 条适用边界或风险提示；',
-        '4) 不要输出“第1部分/第2部分”这类模板标题。'
+        '1) 先直接回答用户当前问题，不要重复用户原话；',
+        '2) 使用自然中文，禁止 Markdown 标记与模板化标题；',
+        '3) 已有上下文足够时不要反问；仅在关键信息缺失时，最多补 1 个澄清问题；',
+        '4) 保持专业、简洁，优先给可执行建议。'
       ].join('\n')
     }
   ]
