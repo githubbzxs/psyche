@@ -254,8 +254,11 @@ export default function Page() {
   }, [llmConfig])
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [activeSessionId, currentMessages.length])
+    if (isWelcomeOnly) {
+      return
+    }
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+  }, [activeSessionId, currentMessages.length, isWelcomeOnly])
 
   useEffect(() => {
     const input = textareaRef.current
@@ -450,34 +453,36 @@ export default function Page() {
           </button>
         </div>
 
-        <div className="cgpt-session-list">
-          {sessions.map((session) => (
-            <button
-              key={session.id}
-              type="button"
-              className={`cgpt-session-item ${session.id === activeSession?.id ? "active" : ""}`}
-              onClick={() => {
-                setActiveSessionId(session.id)
-                if (isMobile) {
-                  setMobileSidebarOpen(false)
-                }
-              }}
-              title={session.title}
-            >
-              <span className="cgpt-session-title">{session.title}</span>
-              <span className="cgpt-session-time">{formatTime(session.createdAt)}</span>
-              <span
-                className="cgpt-session-delete"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  handleDeleteSession(session.id)
+        {!sidebarCollapsed || isMobile ? (
+          <div className="cgpt-session-list">
+            {sessions.map((session) => (
+              <button
+                key={session.id}
+                type="button"
+                className={`cgpt-session-item ${session.id === activeSession?.id ? "active" : ""}`}
+                onClick={() => {
+                  setActiveSessionId(session.id)
+                  if (isMobile) {
+                    setMobileSidebarOpen(false)
+                  }
                 }}
+                title={session.title}
               >
-                Delete
-              </span>
-            </button>
-          ))}
-        </div>
+                <span className="cgpt-session-title">{session.title}</span>
+                <span className="cgpt-session-time">{formatTime(session.createdAt)}</span>
+                <span
+                  className="cgpt-session-delete"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    handleDeleteSession(session.id)
+                  }}
+                >
+                  Delete
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <section className="cgpt-config">
           <h3 className="cgpt-panel-title">API config</h3>
@@ -647,7 +652,6 @@ export default function Page() {
               {sending ? "Sending" : "Send"}
             </button>
           </form>
-          <p className="cgpt-endpoint">API endpoint: {requestUrl}</p>
         </footer>
       </main>
     </div>
