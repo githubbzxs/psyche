@@ -9,6 +9,7 @@ import { providerRoutes } from './providers.js'
 import { mappingRoutes } from './mappings.js'
 import { settingsRoutes } from './settings.js'
 import { strategyRoutes } from './strategy.js'
+import { debateRoutes } from './debate.js'
 
 export async function routes(app: FastifyInstance) {
   await app.register(healthRoutes)
@@ -21,4 +22,5 @@ export async function routes(app: FastifyInstance) {
   await app.register(mappingRoutes)
   await app.register(settingsRoutes)
   await app.register(strategyRoutes)
+  await app.register(debateRoutes)
 }
