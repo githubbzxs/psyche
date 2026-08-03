@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="Psyche 多端 Codex 控制台交互设计原型" />
+    <script>
+      document.documentElement.dataset.theme = localStorage.getItem("psyche-theme") === "light" ? "light" : "dark";
+    </script>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Psyche</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
